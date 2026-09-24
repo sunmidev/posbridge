@@ -1,0 +1,1411 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kiosco web · POS Bridge</title>
+<style>
+  :root {
+    --bg: #f4f6f8; --card: #ffffff; --text: #1d2430; --muted: #667085; --line: #e2e6ea;
+    --primary: #0b3d6b; --primary-text: #ffffff; --ok: #1b7f3b; --busy: #1565c0; --bad: #b3261e; --warn: #b45309;
+    --input: #ffffff; --code: #f1f3f5;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #11151a; --card: #1a2027; --text: #e6e9ed; --muted: #9aa4b0; --line: #2b333c;
+      --primary: #4f8fd1; --primary-text: #0b1420; --ok: #3fb56a; --busy: #5aa2ec; --bad: #ef6b62; --warn: #f0a24a;
+      --input: #12171d; --code: #12171d;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  header { display: flex; align-items: center; gap: 12px; padding: 14px 20px; background: var(--card); border-bottom: 1px solid var(--line); }
+  header h1 { font-size: 18px; margin: 0; flex: 1; }
+  .pill { padding: 4px 10px; border-radius: 999px; font-size: 13px; font-weight: 600; background: var(--line); color: var(--muted); }
+  .pill.on { background: color-mix(in srgb, var(--ok) 18%, transparent); color: var(--ok); }
+  main { display: grid; grid-template-columns: minmax(300px, 380px) 1fr; gap: 16px; padding: 16px 20px; max-width: 1200px; margin: 0 auto; }
+  @media (max-width: 860px) { main { grid-template-columns: 1fr; padding: 12px 16px; } }
+  main > section { min-width: 0; } /* sin esto, el JSON largo ensancha la columna */
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px; margin-bottom: 16px; }
+  .card h2 { font-size: 15px; margin: 0 0 12px; }
+  label { display: block; font-size: 13px; color: var(--muted); margin: 10px 0 4px; }
+  input, textarea, select { width: 100%; padding: 9px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--input); color: var(--text); font: inherit; }
+  textarea { font-family: ui-monospace, Menlo, monospace; font-size: 12px; resize: vertical; min-height: 64px; }
+  .row { display: flex; gap: 8px; }
+  .row > * { flex: 1; }
+  .seg { display: flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  .seg button { flex: 1; border: 0; border-radius: 0; background: transparent; color: var(--text); padding: 8px; }
+  .seg button.sel { background: var(--primary); color: var(--primary-text); }
+  button { font: inherit; padding: 9px 14px; border-radius: 8px; border: 1px solid var(--line); background: var(--card); color: var(--text); cursor: pointer; }
+  button.primary { background: var(--primary); color: var(--primary-text); border-color: var(--primary); font-weight: 600; }
+  button.big { width: 100%; padding: 14px; font-size: 17px; }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  .btns { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+  .hint { font-size: 12px; color: var(--muted); margin-top: 6px; }
+  .warn { font-size: 13px; color: var(--warn); margin: 8px 0 0; }
+  .status { border-radius: 12px; padding: 18px; color: #fff; background: #616161; margin-bottom: 16px; }
+  .status small { opacity: .85; }
+  .status .big { font-size: 22px; font-weight: 700; margin-top: 2px; word-break: break-word; }
+  .status.ok { background: var(--ok); } .status.bad { background: var(--bad); } .status.busy { background: var(--busy); }
+  .status.warn { background: var(--warn); } .status.idle { background: #0b3d6b; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chips button { padding: 6px 10px; font-size: 13px; }
+  .chips button.sel { background: var(--primary); color: var(--primary-text); border-color: var(--primary); }
+  pre { background: var(--code); border: 1px solid var(--line); border-radius: 8px; padding: 10px; font-size: 12px; overflow: auto; max-height: 360px; margin: 8px 0 0; }
+  .kv { display: grid; grid-template-columns: 140px 1fr; gap: 4px 10px; font-size: 14px; }
+  .kv span:nth-child(odd) { color: var(--muted); }
+  .media-list { margin-top: 8px; font-size: 14px; }
+  .media-item { display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--line); }
+  .media-item .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+  .media-item small { color: var(--muted); grid-column: 1; }
+  .media-item button { grid-row: 1 / span 2; grid-column: 2; padding: 4px 10px; font-size: 13px; color: var(--bad); }
+  progress { width: 100%; height: 10px; margin-top: 10px; accent-color: var(--primary); }
+  #log { font-family: ui-monospace, Menlo, monospace; font-size: 12px; max-height: 260px; overflow: auto; margin: 0; }
+  #log div { padding: 2px 0; border-bottom: 1px dashed var(--line); }
+  #log .warn { color: var(--warn); margin: 0; } #log .err { color: var(--bad); }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Kiosco web · POS Bridge</h1>
+  <span id="connPill" class="pill">Sin conectar</span>
+</header>
+
+<main>
+  <section>
+    <div class="card">
+      <h2>Configuración</h2>
+      <label for="code">Código de emparejamiento (lo muestra el POS en Kioscos)</label>
+      <input id="code" placeholder="K01-4827-1936" autocomplete="off" spellcheck="false" style="font-family: ui-monospace, Menlo, monospace; font-size: 18px; letter-spacing: 1px">
+      <div id="codeInfo" class="hint"></div>
+      <label for="appId">app_id del integrador</label>
+      <input id="appId" placeholder="PGSP2M0005" autocomplete="off">
+
+      <label>Transporte</label>
+      <div class="seg" role="tablist">
+        <button id="tWifi" class="sel" type="button">WiFi</button>
+        <button id="tBt" type="button">Bluetooth</button>
+      </div>
+
+      <div id="wifiBox">
+        <div class="row">
+          <div><label for="host">IP del POS</label><input id="host" placeholder="192.168.1.50"></div>
+          <div style="flex:.5"><label for="port">Puerto</label><input id="port" inputmode="numeric" value="8521"></div>
+        </div>
+        <div class="hint">WebSocket del Bridge: puerto TCP + 1 (8521 por defecto). La computadora y el POS deben estar en la misma red.</div>
+      </div>
+
+      <div id="btBox" class="hidden">
+        <div class="btns"><button id="pickBt" type="button">Elegir POS por Bluetooth…</button></div>
+        <div id="btInfo" class="hint">Primero empareje el POS con esta computadora desde los ajustes de Bluetooth del sistema.</div>
+      </div>
+
+      <div id="envWarn" class="warn hidden"></div>
+
+      <div class="btns">
+        <button id="connect" class="primary" type="button">Conectar</button>
+        <button id="disconnect" type="button">Desconectar</button>
+        <button id="kill" type="button" title="Simula que se cae la red para probar la recuperación">Cortar conexión</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Bridge</h2>
+      <div id="caps" class="kv"><span>Estado</span><span>sin conectar</span></div>
+    </div>
+
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+        <h2 style="margin:0">Pantalla del POS</h2>
+        <button id="mediaRefresh" type="button" style="width:auto;padding:6px 12px">Actualizar</button>
+      </div>
+      <div class="hint">Videos e imágenes que el POS muestra en rotación mientras espera cobrar.</div>
+      <div id="mediaList" class="media-list">Conéctese para ver la lista.</div>
+      <div id="mediaUsage" class="hint"></div>
+      <label for="mediaFile">Agregar archivo</label>
+      <input id="mediaFile" type="file" accept="video/mp4,video/webm,video/3gpp,image/jpeg,image/png,image/webp">
+      <div class="row">
+        <div><label for="mediaSeconds">Segundos (imagen)</label><input id="mediaSeconds" type="number" min="3" max="120" value="8"></div>
+        <div><label for="mediaPin">PIN admin del POS</label><input id="mediaPin" type="password" inputmode="numeric" maxlength="8" autocomplete="off"></div>
+      </div>
+      <div class="btns">
+        <button id="mediaUpload" class="primary" type="button">Subir</button>
+        <button id="mediaCancel" class="hidden" type="button">Cancelar</button>
+      </div>
+      <progress id="mediaProg" class="hidden" max="1" value="0"></progress>
+      <div id="mediaMsg" class="hint">Videos MP4 (H.264) o WebM; imágenes JPG, PNG o WebP. El PIN es el de administrador del Bridge.</div>
+    </div>
+  </section>
+
+  <section>
+    <div id="status" class="status idle">
+      <small id="statusSmall">Listo</small>
+      <div id="statusBig" class="big">Configure y conecte con el POS</div>
+    </div>
+
+    <div class="card">
+      <h2>Cobro</h2>
+      <div class="row">
+        <div><label for="cedula">Cédula (opcional)</label><input id="cedula" value="V12345678"></div>
+        <div><label for="monto">Monto (Bs.)</label><input id="monto" value="10,00" inputmode="decimal"></div>
+      </div>
+      <label>Tipo de cuenta</label>
+      <div id="cuentas" class="chips">
+        <button type="button" data-v="" class="sel">Sin enviar</button>
+        <button type="button" data-v="0">Principal</button>
+        <button type="button" data-v="1">Ahorro</button>
+        <button type="button" data-v="2">Corriente</button>
+      </div>
+      <div class="hint">DummyV5: 4,44 → error 425 (el Bridge hace el cierre solo) · 2,22 → pide firma</div>
+      <div class="btns"><button id="cobrar" class="primary big" type="button">Cobrar</button></div>
+
+      <div class="btns">
+        <button data-op="ANULACION" type="button">Anulación (300)</button>
+        <button data-op="CIERRE" type="button">Cierre (500)</button>
+        <button data-op="ULTIMA_TRANSACCION" type="button">Última transacción (140)</button>
+        <button data-op="TEST_COMUNICACION" type="button">Test comunicación (420)</button>
+      </div>
+      <label>Operaciones de configuración</label>
+      <div class="btns" style="margin-top:4px">
+        <button data-op="BORRAR_LOTE" type="button">Borrar lote (800)</button>
+        <button data-op="BORRAR_REVERSO" type="button">Borrar reverso (805)</button>
+        <button data-op="CONF_SIM" type="button">Conf. SIM (430)</button>
+        <button data-op="CONF_WIFI" type="button">Conf. WiFi (440)</button>
+      </div>
+
+      <div id="pendingBox" class="row hidden" style="margin-top:12px; align-items:center">
+        <div id="pendingText" class="warn" style="margin:0"></div>
+        <div style="flex:.5"><button id="consultar" type="button" style="width:100%">Consultar</button></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+        <h2 style="margin:0">Mensajes de la última operación</h2>
+        <button id="traceToggle" type="button" style="width:auto;padding:6px 12px">Ver traza detallada</button>
+      </div>
+      <div id="traceHint" class="hint">Lo que salió del kiosco y la respuesta que recibió.</div>
+      <div id="trace" class="hint">—</div>
+    </div>
+
+    <div class="card">
+      <h2>Resultado</h2>
+      <div id="summary" class="kv"><span>—</span><span>Sin operaciones todavía</span></div>
+      <pre id="json" class="hidden"></pre>
+    </div>
+
+    <div class="card">
+      <h2>Eventos</h2>
+      <div id="log"></div>
+    </div>
+  </section>
+</main>
+
+<script type="module">
+// Versión de un solo archivo: se abre con doble clic (file://). Generada desde index.html + bridge-client.js.
+// --- bridge-client.js (incluido para que funcione con doble clic, sin servidor) ---
+// Cliente del protocolo kiosco ↔ POS Bridge para navegador (y Node 22+ en las pruebas).
+// Es el equivalente en JavaScript de BridgeClient de :core: mismo framing, mismo HMAC,
+// misma recuperación por request_id.
+//
+// Frame: [u32 big-endian N][32 bytes HMAC-SHA256][JSON UTF-8]
+// Transportes: WebSocket (WiFi) y Web Serial (Bluetooth RFCOMM, Chrome/Edge de escritorio).
+
+const PROTOCOL_VERSION = 1;
+const SDK_VERSION = 'web-0.1.0';
+const DEFAULT_WS_PORT = 8521;
+const BT_SERVICE_UUID = '6f0b3c7e-2a4d-4e3b-9a61-5b8a3c1d9e42';
+const BT_SPP_UUID = '00001101-0000-1000-8000-00805f9b34fb';
+
+const MAC_SIZE = 32;
+const MAX_FRAME = 256 * 1024;
+const enc = new TextEncoder();
+const dec = new TextDecoder();
+
+class BridgeAuthError extends Error {
+  constructor(code, message) { super(message); this.code = code; this.name = 'BridgeAuthError'; }
+}
+/** Error de una operación de contenido (MEDIA_*): code es un BRIDGE_* del Bridge. */
+class MediaError extends Error {
+  constructor(code, message) { super(message); this.code = code; this.name = 'MediaError'; }
+}
+class TimeoutError extends Error {
+  constructor(ms) { super(`Sin respuesta del Bridge en ${Math.round(ms / 1000)} s`); this.name = 'TimeoutError'; }
+}
+
+// ------------------------------------------------------------------ utilidades
+
+function base32Decode(text) {
+  const A = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+  const clean = text.toUpperCase().replace(/[\s=-]/g, '');
+  const out = [];
+  let buffer = 0, bits = 0;
+  for (const c of clean) {
+    const v = A.indexOf(c);
+    if (v < 0) throw new Error(`Carácter Base32 inválido: ${c}`);
+    buffer = (buffer << 5) | v;
+    bits += 5;
+    if (bits >= 8) {
+      out.push((buffer >>> (bits - 8)) & 0xff);
+      bits -= 8;
+    }
+    buffer &= (1 << bits) - 1;
+  }
+  return new Uint8Array(out);
+}
+
+const hex = (b) => Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('');
+const randomHex = (n) => hex(crypto.getRandomValues(new Uint8Array(n)));
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/** Base64 de bytes, en tramos para no reventar la pila con archivos grandes. */
+function bytesToBase64(bytes) {
+  let bin = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  return btoa(bin);
+}
+
+// Las partes de un archivo no van a la traza: son cientos de mensajes con Base64.
+const UNTRACED = new Set(['PING', 'PONG', 'MEDIA_CHUNK', 'MEDIA_PROGRESS']);
+const short = (id) => (id || '').slice(0, 8);
+
+function newRequestId() {
+  return crypto.randomUUID ? crypto.randomUUID() : randomHex(16);
+}
+
+// ------------------------------------------------------------------ criptografía
+// Si la página se abre por http://<IP> (contexto no seguro), el navegador no expone crypto.subtle.
+// Para ese caso va una implementación en JavaScript de SHA-1, SHA-256, HMAC y PBKDF2. Da los mismos
+// bytes que WebCrypto (lo verifican las pruebas) y solo se usa cuando WebCrypto no está.
+
+let forceJsCrypto = false;
+/** Para pruebas: obliga a usar la implementación en JavaScript aunque haya WebCrypto. */
+function useJsCrypto(on) { forceJsCrypto = !!on; }
+const hasSubtle = () => !forceJsCrypto && typeof crypto !== 'undefined' && !!crypto.subtle;
+/** 'webcrypto' o 'js': qué implementación se está usando. */
+const cryptoMode = () => (hasSubtle() ? 'webcrypto' : 'js');
+
+const readBE = (b, o) => (b[o] << 24) | (b[o + 1] << 16) | (b[o + 2] << 8) | b[o + 3];
+
+const SHA1 = {
+  out: 20, w: 80,
+  init: () => Int32Array.of(0x67452301, 0xefcdab89, 0x98badcfe, 0x10325476, 0xc3d2e1f0),
+  compress(s, b, o, w) {
+    for (let i = 0; i < 16; i++) w[i] = readBE(b, o + 4 * i);
+    for (let i = 16; i < 80; i++) { const x = w[i - 3] ^ w[i - 8] ^ w[i - 14] ^ w[i - 16]; w[i] = (x << 1) | (x >>> 31); }
+    let a = s[0], c1 = s[1], c = s[2], d = s[3], e = s[4];
+    for (let i = 0; i < 80; i++) {
+      const f = i < 20 ? (c1 & c) | (~c1 & d) : i < 40 ? c1 ^ c ^ d : i < 60 ? (c1 & c) | (c1 & d) | (c & d) : c1 ^ c ^ d;
+      const k = i < 20 ? 0x5a827999 : i < 40 ? 0x6ed9eba1 : i < 60 ? 0x8f1bbcdc : 0xca62c1d6;
+      const t = (((a << 5) | (a >>> 27)) + f + e + k + w[i]) | 0;
+      e = d; d = c; c = (c1 << 30) | (c1 >>> 2); c1 = a; a = t;
+    }
+    s[0] = (s[0] + a) | 0; s[1] = (s[1] + c1) | 0; s[2] = (s[2] + c) | 0; s[3] = (s[3] + d) | 0; s[4] = (s[4] + e) | 0;
+  },
+};
+
+const K256 = Int32Array.from([
+  0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+  0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+  0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+  0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+  0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+  0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+  0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+  0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
+]);
+const ror = (x, n) => (x >>> n) | (x << (32 - n));
+
+const SHA256 = {
+  out: 32, w: 64,
+  init: () => Int32Array.of(0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19),
+  compress(s, b, o, w) {
+    for (let i = 0; i < 16; i++) w[i] = readBE(b, o + 4 * i);
+    for (let i = 16; i < 64; i++) {
+      const x = w[i - 15], y = w[i - 2];
+      w[i] = (w[i - 16] + (ror(x, 7) ^ ror(x, 18) ^ (x >>> 3)) + w[i - 7] + (ror(y, 17) ^ ror(y, 19) ^ (y >>> 10))) | 0;
+    }
+    let a = s[0], c1 = s[1], c = s[2], d = s[3], e = s[4], f = s[5], g = s[6], h = s[7];
+    for (let i = 0; i < 64; i++) {
+      const t1 = (h + (ror(e, 6) ^ ror(e, 11) ^ ror(e, 25)) + ((e & f) ^ (~e & g)) + K256[i] + w[i]) | 0;
+      const t2 = ((ror(a, 2) ^ ror(a, 13) ^ ror(a, 22)) + ((a & c1) ^ (a & c) ^ (c1 & c))) | 0;
+      h = g; g = f; f = e; e = (d + t1) | 0; d = c; c = c1; c1 = a; a = (t1 + t2) | 0;
+    }
+    s[0] = (s[0] + a) | 0; s[1] = (s[1] + c1) | 0; s[2] = (s[2] + c) | 0; s[3] = (s[3] + d) | 0;
+    s[4] = (s[4] + e) | 0; s[5] = (s[5] + f) | 0; s[6] = (s[6] + g) | 0; s[7] = (s[7] + h) | 0;
+  },
+};
+
+/** Termina el hash de `msg` partiendo de `state`, que ya procesó `prefixLen` bytes (múltiplo de 64). */
+function hashFrom(alg, state, prefixLen, msg) {
+  const s = state.slice();
+  const w = new Int32Array(alg.w);
+  const full = msg.length - (msg.length % 64);
+  for (let o = 0; o < full; o += 64) alg.compress(s, msg, o, w);
+  const rest = msg.length - full;
+  const tail = new Uint8Array(rest < 56 ? 64 : 128);
+  tail.set(msg.subarray(full));
+  tail[rest] = 0x80;
+  const bits = (prefixLen + msg.length) * 8;
+  const n = tail.length;
+  const hi = Math.floor(bits / 0x100000000), lo = bits >>> 0;
+  tail[n - 8] = hi >>> 24; tail[n - 7] = hi >>> 16; tail[n - 6] = hi >>> 8; tail[n - 5] = hi;
+  tail[n - 4] = lo >>> 24; tail[n - 3] = lo >>> 16; tail[n - 2] = lo >>> 8; tail[n - 1] = lo;
+  for (let o = 0; o < n; o += 64) alg.compress(s, tail, o, w);
+  const out = new Uint8Array(alg.out);
+  for (let i = 0; i < alg.out / 4; i++) { out[4 * i] = s[i] >>> 24; out[4 * i + 1] = s[i] >>> 16; out[4 * i + 2] = s[i] >>> 8; out[4 * i + 3] = s[i]; }
+  return out;
+}
+
+/** HMAC con la clave ya procesada (los bloques ipad/opad se calculan una sola vez). */
+function jsHmacFor(alg, key) {
+  const k = new Uint8Array(64);
+  k.set(key.length > 64 ? hashFrom(alg, alg.init(), 0, key) : key);
+  const w = new Int32Array(alg.w);
+  const si = alg.init(), so = alg.init();
+  alg.compress(si, k.map((x) => x ^ 0x36), 0, w);
+  alg.compress(so, k.map((x) => x ^ 0x5c), 0, w);
+  return (data) => hashFrom(alg, so, 64, hashFrom(alg, si, 64, data));
+}
+
+function jsPbkdf2(alg, password, salt, iterations, length) {
+  const mac = jsHmacFor(alg, password);
+  const out = new Uint8Array(length);
+  for (let block = 1, pos = 0; pos < length; block++) {
+    const s = new Uint8Array(salt.length + 4);
+    s.set(salt);
+    s[salt.length] = block >>> 24; s[salt.length + 1] = block >>> 16; s[salt.length + 2] = block >>> 8; s[salt.length + 3] = block;
+    let u = mac(s);
+    const t = u.slice();
+    for (let i = 1; i < iterations; i++) { u = mac(u); for (let j = 0; j < t.length; j++) t[j] ^= u[j]; }
+    out.set(t.subarray(0, Math.min(t.length, length - pos)), pos);
+    pos += t.length;
+  }
+  return out;
+}
+
+async function sha256(bytes) {
+  if (hasSubtle()) return new Uint8Array(await crypto.subtle.digest('SHA-256', bytes));
+  return hashFrom(SHA256, SHA256.init(), 0, bytes);
+}
+
+async function hmac(key, data) {
+  if (!hasSubtle()) return jsHmacFor(SHA256, key)(data);
+  const k = await crypto.subtle.importKey('raw', key, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  return new Uint8Array(await crypto.subtle.sign('HMAC', k, data));
+}
+
+/** Solo para las pruebas: compara la implementación JS con WebCrypto. */
+const _jsCrypto = {
+  sha1: (b) => hashFrom(SHA1, SHA1.init(), 0, b),
+  sha256: (b) => hashFrom(SHA256, SHA256.init(), 0, b),
+  hmacSha256: (k, d) => jsHmacFor(SHA256, k)(d),
+  pbkdf2Sha1: (p, s, it, len) => jsPbkdf2(SHA1, p, s, it, len),
+};
+
+function sameBytes(a, b) {
+  if (a.length !== b.length) return false;
+  let d = 0;
+  for (let i = 0; i < a.length; i++) d |= a[i] ^ b[i];
+  return d === 0;
+}
+
+/** Código corto para escribir a mano: `K01-4827-1936` (ID del kiosco + PIN de 8 dígitos). */
+function parseShortCode(text) {
+  const m = /^([A-Za-z0-9_]{1,16})[-\s]*([0-9]{4})[-\s]*([0-9]{4})$/.exec(String(text || '').trim());
+  return m ? { kioskId: m[1].toUpperCase(), pin: m[2] + m[3] } : null;
+}
+
+const PIN_ITERATIONS = 100_000;
+
+/** Misma derivación que PairingPin.deriveKey del Bridge: PBKDF2-SHA1, sal = "sbp1-pin|" + ID. */
+async function derivePinKey(kioskId, pin) {
+  if (!hasSubtle()) return jsPbkdf2(SHA1, enc.encode(pin), enc.encode(`sbp1-pin|${kioskId.toUpperCase()}`), PIN_ITERATIONS, 32);
+  const base = await crypto.subtle.importKey('raw', enc.encode(pin), 'PBKDF2', false, ['deriveBits']);
+  const bits = await crypto.subtle.deriveBits(
+    { name: 'PBKDF2', hash: 'SHA-1', salt: enc.encode(`sbp1-pin|${kioskId.toUpperCase()}`), iterations: PIN_ITERATIONS },
+    base, 256,
+  );
+  return new Uint8Array(bits);
+}
+
+/** Acepta el código corto o el largo. Devuelve { kioskId, key, bridgeId, host, port, short }. */
+async function resolvePairingCode(text) {
+  const s = parseShortCode(text);
+  if (s) return { kioskId: s.kioskId, key: await derivePinKey(s.kioskId, s.pin), bridgeId: '', host: null, port: null, short: true };
+  return { ...parsePairingCode(text), short: false };
+}
+
+/** Formato largo (se sigue aceptando): `SBP1;<kioskId>;<claveBase32>;<bridgeId>;<host>;<puerto>` */
+function parsePairingCode(text) {
+  const parts = (text || '').trim().split(';');
+  if (parts.length !== 6 || parts[0] !== 'SBP1') throw new Error('Código inválido: debe ser como K01-4827-1936');
+  const key = base32Decode(parts[2]);
+  if (key.length !== 32) throw new Error('La clave del código de emparejamiento no es válida');
+  return {
+    kioskId: parts[1],
+    key,
+    bridgeId: parts[3],
+    host: parts[4] || null,
+    port: parts[5] ? Number(parts[5]) : null,
+  };
+}
+
+/** Acepta "4,44", "4.44", "4" o "1.234,56". Devuelve céntimos o null. */
+function parseAmount(text) {
+  let t = String(text || '').trim().replace(/\s/g, '');
+  if (!t) return null;
+  if (t.includes(',')) t = t.replace(/\./g, '').replace(',', '.');
+  if (!/^\d+(\.\d{1,2})?$/.test(t)) return null;
+  const [ent, dec2 = ''] = t.split('.');
+  const cents = Number(ent) * 100 + Number(dec2.padEnd(2, '0'));
+  return cents > 0 && Number.isSafeInteger(cents) ? cents : null;
+}
+
+function formatAmount(cents) {
+  const ent = Math.floor(cents / 100).toString().replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+  return `${ent},${String(cents % 100).padStart(2, '0')}`;
+}
+
+// ------------------------------------------------------------------ transportes
+
+/** WiFi: WebSocket al POS (puerto TCP + 1, por defecto 8521). */
+function webSocketConnector(url) {
+  return () => {
+    let ws;
+    return {
+      name: 'ws',
+      describe: url,
+      open(onData, onClose) {
+        return new Promise((resolve, reject) => {
+          let opened = false;
+          ws = new WebSocket(url);
+          ws.binaryType = 'arraybuffer';
+          ws.onopen = () => { opened = true; resolve(); };
+          ws.onmessage = (e) => onData(new Uint8Array(e.data));
+          ws.onerror = () => { if (!opened) reject(new Error(`No se pudo conectar a ${url}`)); };
+          ws.onclose = () => {
+            if (!opened) reject(new Error(`No se pudo conectar a ${url}`));
+            else onClose(new Error('Conexión cerrada'));
+          };
+        });
+      },
+      async write(bytes) {
+        if (!ws || ws.readyState !== 1) throw new Error('Conexión cerrada');
+        ws.send(bytes);
+      },
+      close() { try { ws && ws.close(); } catch { /* nada */ } },
+    };
+  };
+}
+
+/** Bluetooth: puerto serie de Web Serial (RFCOMM del POS emparejado con esta computadora). */
+function serialConnector(port) {
+  return () => {
+    let reader, writer, closedByUs = false;
+    const info = port.getInfo ? port.getInfo() : {};
+    const cleanup = async () => {
+      try { await reader?.cancel(); } catch { /* nada */ }
+      try { reader?.releaseLock(); } catch { /* nada */ }
+      try { writer?.releaseLock(); } catch { /* nada */ }
+      try { await port.close(); } catch { /* nada */ }
+    };
+    return {
+      name: 'bt',
+      describe: info.bluetoothServiceClassId ? `Bluetooth ${info.bluetoothServiceClassId}` : 'puerto serie',
+      async open(onData, onClose) {
+        await port.open({ baudRate: 115200 }); // RFCOMM ignora la velocidad, pero la API la exige
+        writer = port.writable.getWriter();
+        reader = port.readable.getReader();
+        (async () => {
+          try {
+            while (true) {
+              const { value, done } = await reader.read();
+              if (done) break;
+              if (value && value.length) onData(value);
+            }
+          } catch { /* se cortó */ }
+          if (!closedByUs) {
+            closedByUs = true;
+            await cleanup();
+            onClose(new Error('Conexión Bluetooth cerrada'));
+          }
+        })();
+      },
+      async write(bytes) { await writer.write(bytes); },
+      async close() {
+        if (closedByUs) return;
+        closedByUs = true;
+        await cleanup();
+      },
+    };
+  };
+}
+
+async function requestBluetoothPort() {
+  if (!('serial' in navigator)) throw new Error('Este navegador no tiene Web Serial. Use Chrome o Edge de escritorio.');
+  // Sin filtros: aparecen los puertos serie normales (macOS crea /dev/cu.* para SPP) y además
+  // los servicios RFCOMM con estos UUID de equipos emparejados.
+  return navigator.serial.requestPort({ allowedBluetoothServiceClassIds: [BT_SERVICE_UUID, BT_SPP_UUID] });
+}
+
+// ------------------------------------------------------------------ sesión (canal autenticado)
+
+class Session {
+  constructor(conn, trace = () => {}) {
+    this.conn = conn;
+    this.trace = trace;
+    this.buf = new Uint8Array(0);
+    this.queue = [];
+    this.waiters = [];
+    this.closed = false;
+    this.key = null;
+    this.sendSeq = 0;
+    this.recvSeq = 0;
+    this.chain = Promise.resolve();
+    this.pingTimer = null;
+  }
+
+  async open() {
+    await this.conn.open((d) => this.onData(d), (e) => this.onClose(e));
+  }
+
+  onData(chunk) {
+    const merged = new Uint8Array(this.buf.length + chunk.length);
+    merged.set(this.buf);
+    merged.set(chunk, this.buf.length);
+    this.buf = merged;
+    while (this.buf.length >= 4) {
+      const len = new DataView(this.buf.buffer, this.buf.byteOffset, 4).getUint32(0);
+      if (len < MAC_SIZE + 2 || len > MAX_FRAME) {
+        this.onClose(new Error(`Frame inválido (${len} bytes)`));
+        this.conn.close();
+        return;
+      }
+      if (this.buf.length < 4 + len) break;
+      const frame = this.buf.slice(4, 4 + len);
+      this.buf = this.buf.slice(4 + len);
+      const f = { mac: frame.slice(0, MAC_SIZE), body: frame.slice(MAC_SIZE) };
+      const w = this.waiters.shift();
+      if (w) w.resolve(f); else this.queue.push(f);
+    }
+  }
+
+  onClose(err) {
+    if (this.closed) return;
+    this.closed = true;
+    clearInterval(this.pingTimer);
+    const e = err || new Error('Conexión cerrada');
+    this.waiters.splice(0).forEach((w) => w.reject(e));
+  }
+
+  close() {
+    this.onClose(new Error('Conexión cerrada por el kiosco'));
+    this.conn.close();
+  }
+
+  readRaw(timeoutMs) {
+    if (this.queue.length) return Promise.resolve(this.queue.shift());
+    if (this.closed) return Promise.reject(new Error('Conexión cerrada'));
+    return new Promise((resolve, reject) => {
+      const w = {
+        resolve: (f) => { clearTimeout(t); resolve(f); },
+        reject: (e) => { clearTimeout(t); reject(e); },
+      };
+      const t = timeoutMs ? setTimeout(() => {
+        this.waiters = this.waiters.filter((x) => x !== w);
+        reject(new TimeoutError(timeoutMs));
+      }, timeoutMs) : null;
+      this.waiters.push(w);
+    });
+  }
+
+  async writeRaw(key, obj) {
+    const body = enc.encode(JSON.stringify(obj));
+    const mac = await hmac(key, body);
+    const out = new Uint8Array(4 + MAC_SIZE + body.length);
+    new DataView(out.buffer).setUint32(0, MAC_SIZE + body.length);
+    out.set(mac, 4);
+    out.set(body, 4 + MAC_SIZE);
+    await this.conn.write(out);
+  }
+
+  /** Envía con seq creciente. Las escrituras se encadenan para que el seq no se desordene. */
+  send(obj) {
+    const p = this.chain.then(async () => {
+      if (this.closed) throw new Error('Conexión cerrada');
+      this.sendSeq += 1;
+      const full = { ...obj, seq: this.sendSeq };
+      await this.writeRaw(this.key, full);
+      if (!UNTRACED.has(full.t)) this.trace('out', full);
+    });
+    this.chain = p.catch(() => {});
+    return p;
+  }
+
+  async receive(timeoutMs) {
+    const f = await this.readRaw(timeoutMs);
+    if (!sameBytes(await hmac(this.key, f.body), f.mac)) throw new BridgeAuthError('BRIDGE_AUTH', 'HMAC inválido');
+    const m = JSON.parse(dec.decode(f.body));
+    if (!(Number(m.seq) > this.recvSeq)) throw new BridgeAuthError('BRIDGE_AUTH', 'seq repetido o fuera de orden');
+    this.recvSeq = Number(m.seq);
+    if (!UNTRACED.has(m.t)) this.trace('in', m);
+    return m;
+  }
+
+  async handshake(kioskId, pairingKey, timeoutMs) {
+    const cn = randomHex(16);
+    await this.writeRaw(pairingKey, { t: 'HELLO', v: PROTOCOL_VERSION, kiosk_id: kioskId, nonce: cn, sdk: SDK_VERSION });
+    const f = await this.readRaw(timeoutMs);
+    const reply = JSON.parse(dec.decode(f.body));
+    if (!sameBytes(await hmac(pairingKey, f.body), f.mac)) {
+      if (reply.t === 'ERROR') throw new BridgeAuthError(reply.code || 'BRIDGE_AUTH', reply.message || 'Rechazado');
+      throw new BridgeAuthError('BRIDGE_AUTH', 'Respuesta del Bridge con firma inválida');
+    }
+    if (reply.t !== 'HELLO_OK' || reply.echo !== cn) throw new BridgeAuthError('BRIDGE_AUTH', 'Handshake inválido');
+    this.key = await hmac(pairingKey, enc.encode(`sbp1-session|${cn}|${reply.nonce}`));
+    return reply.caps || {};
+  }
+}
+
+// ------------------------------------------------------------------ cliente
+
+/**
+ * Resultados de execute():
+ * - { kind: 'completed', requestId, result }   hubo respuesta (aprobada o no)
+ * - { kind: 'busy', requestId, activeRequestId } POS ocupado, no se ejecutó nada
+ * - { kind: 'rejected', requestId, code, message } rechazada sin ejecutar
+ * - { kind: 'indeterminate', requestId, reason } se perdió la conexión después de enviar: consultar antes de reintentar
+ */
+class BridgeClient {
+  /** trace(direction, msg): cada mensaje del protocolo ('out' enviado, 'in' recibido), sin PING/PONG. */
+  constructor({ connector, kioskId, pairingKey, appId, log = () => {}, trace = () => {}, config = {} }) {
+    this.trace = trace;
+    this.connector = connector;
+    this.kioskId = kioskId;
+    this.pairingKey = pairingKey;
+    this.appId = appId;
+    this.log = log;
+    this.cfg = {
+      ackTimeoutMs: 10_000,
+      resultTimeoutMs: 240_000,
+      pingIntervalMs: 30_000,
+      handshakeTimeoutMs: 15_000,
+      reconnectAttempts: 5,
+      reconnectDelayMs: 2_000,
+      ...config,
+    };
+    this.session = null;
+    this.opening = null;
+    this.opChain = Promise.resolve();
+    this.caps = null;
+  }
+
+  get connected() { return !!this.session && !this.session.closed; }
+
+  async connect() { return (await this.ensureSession()).caps; }
+
+  async ensureSession() {
+    if (this.session && !this.session.closed) return this.session;
+    if (!this.opening) this.opening = this.openSession().finally(() => { this.opening = null; });
+    return this.opening;
+  }
+
+  async openSession() {
+    const conn = this.connector();
+    const s = new Session(conn, (dir, m) => { try { this.trace(dir, m); } catch { /* nada */ } });
+    try {
+      await s.open();
+      s.caps = await s.handshake(this.kioskId, this.pairingKey, this.cfg.handshakeTimeoutMs);
+    } catch (e) {
+      s.close();
+      throw e;
+    }
+    this.caps = s.caps;
+    s.pingTimer = setInterval(() => {
+      s.send({ t: 'PING' }).catch(() => this.dropSession(s));
+    }, this.cfg.pingIntervalMs);
+    this.session = s;
+    this.log('info', `Conectado al Bridge por ${conn.name} (${conn.describe})`);
+    return s;
+  }
+
+  dropSession(s) {
+    s.close();
+    if (this.session === s) this.session = null;
+  }
+
+  disconnect() { if (this.session) this.dropSession(this.session); }
+
+  /** Para pruebas: corta la conexión como si se cayera la red, sin avisar a la operación en curso. */
+  killConnection() {
+    const s = this.session;
+    if (!s) return false;
+    s.conn.close();
+    s.onClose(new Error('Conexión cortada a propósito (prueba)'));
+    return true;
+  }
+
+  lock(fn) {
+    const run = this.opChain.then(fn, fn);
+    this.opChain = run.catch(() => {});
+    return run;
+  }
+
+  compra({ cedula, montoCentimos, cuenta = null, requestId = newRequestId() }, onStatus) {
+    const params = { cedula, monto_centimos: montoCentimos };
+    if (cuenta != null && cuenta !== '') params.cuenta = String(cuenta);
+    return this.execute({ requestId, op: 'COMPRA', params }, onStatus);
+  }
+  anulacion({ requestId = newRequestId() } = {}, onStatus) { return this.execute({ requestId, op: 'ANULACION' }, onStatus); }
+  anulacionPorAutorizacion({ codigoAutorizacion, requestId = newRequestId() }, onStatus) {
+    return this.execute({ requestId, op: 'ANULACION_POR_AUTORIZACION', params: { codigo_autorizacion: codigoAutorizacion } }, onStatus);
+  }
+  cierre({ requestId = newRequestId() } = {}, onStatus) { return this.execute({ requestId, op: 'CIERRE' }, onStatus); }
+  ultimaTransaccion({ requestId = newRequestId() } = {}, onStatus) { return this.execute({ requestId, op: 'ULTIMA_TRANSACCION' }, onStatus); }
+  testComunicacion({ requestId = newRequestId() } = {}, onStatus) { return this.execute({ requestId, op: 'TEST_COMUNICACION' }, onStatus); }
+  // Operaciones de configuración: 800 borrar lote, 805 borrar reverso, 430 conf. SIM, 440 conf. WiFi
+  borrarLote({ requestId = newRequestId() } = {}, onStatus) { return this.execute({ requestId, op: 'BORRAR_LOTE' }, onStatus); }
+  borrarReverso({ requestId = newRequestId() } = {}, onStatus) { return this.execute({ requestId, op: 'BORRAR_REVERSO' }, onStatus); }
+  confSim({ requestId = newRequestId() } = {}, onStatus) { return this.execute({ requestId, op: 'CONF_SIM' }, onStatus); }
+  confWifi({ requestId = newRequestId() } = {}, onStatus) { return this.execute({ requestId, op: 'CONF_WIFI' }, onStatus); }
+
+  // ---------------------------------------------------------------- contenido de la pantalla del POS
+
+  /** Un pedido MEDIA_* y su respuesta (se reconoce por "ref"). Lanza MediaError si el Bridge responde ERROR. */
+  mediaRequest(msg, expect, timeoutMs = 30_000) {
+    return this.lock(async () => {
+      const s = await this.ensureSession();
+      const ref = randomHex(6);
+      await s.send({ ...msg, ref });
+      while (true) {
+        const m = await s.receive(timeoutMs);
+        if (m.ref !== ref) continue; // restos de otra operación
+        if (m.t === 'ERROR') throw new MediaError(m.code || 'ERROR', m.message || 'Error');
+        if (expect.includes(m.t)) return m;
+      }
+    });
+  }
+
+  /** Lista rotativa actual: { items: [{id, kind, mime, name, size, seconds}], limits }. */
+  async mediaList() {
+    const m = await this.mediaRequest({ t: 'MEDIA_LIST' }, ['MEDIA_LIST_RESULT']);
+    return { items: m.items || [], limits: m.limits || {} };
+  }
+
+  /** Borra un archivo de la lista. Pide el PIN de administrador del POS. */
+  async mediaDelete(id, adminPin) {
+    const m = await this.mediaRequest({ t: 'MEDIA_DELETE', id, admin_pin: adminPin }, ['MEDIA_LIST_RESULT']);
+    return { items: m.items || [], limits: m.limits || {} };
+  }
+
+  /**
+   * Sube un video o imagen al final de la lista rotativa. file: Blob/File, ArrayBuffer o Uint8Array.
+   * seconds: tiempo en pantalla si es imagen. onProgress(enviados, total). signal: AbortSignal opcional.
+   * Entre parte y parte se suelta el candado, así un cobro no espera a que termine un video pesado.
+   */
+  async mediaUpload(file, { name, seconds = 8, adminPin, signal } = {}, onProgress = () => {}) {
+    const bytes = file instanceof Uint8Array ? file : new Uint8Array(file instanceof ArrayBuffer ? file : await file.arrayBuffer());
+    const sha256Hex = hex(await sha256(bytes));
+    const ready = await this.mediaRequest({
+      t: 'MEDIA_BEGIN', name: name || file.name || 'archivo', size: bytes.length, sha256: sha256Hex, seconds, admin_pin: adminPin,
+    }, ['MEDIA_READY']);
+    const uploadId = ready.upload_id;
+    const chunk = Number(ready.chunk_bytes) || 96 * 1024;
+    try {
+      let offset = 0;
+      onProgress(0, bytes.length);
+      while (offset < bytes.length) {
+        if (signal?.aborted) throw new MediaError('CANCELADA', 'Carga cancelada');
+        const part = bytes.subarray(offset, Math.min(offset + chunk, bytes.length));
+        const p = await this.mediaRequest({ t: 'MEDIA_CHUNK', upload_id: uploadId, offset, data: bytesToBase64(part) }, ['MEDIA_PROGRESS']);
+        offset = Number(p.received);
+        onProgress(offset, bytes.length);
+      }
+      // El POS vuelve a calcular el SHA-256 del archivo completo: con videos grandes tarda unos segundos
+      const done = await this.mediaRequest({ t: 'MEDIA_END', upload_id: uploadId }, ['MEDIA_DONE'], 120_000);
+      return done.item;
+    } catch (e) {
+      if (this.connected) this.session.send({ t: 'MEDIA_ABORT', upload_id: uploadId }).catch(() => {});
+      throw e;
+    }
+  }
+
+  /** Consulta de solo lectura: no ejecuta nada en el POS. */
+  consultar(requestId) {
+    return this.lock(async () => {
+      const s = await this.ensureSession();
+      await s.send({ t: 'QUERY', request_id: requestId });
+      while (true) {
+        const m = await s.receive(this.cfg.ackTimeoutMs);
+        if (m.t === 'QUERY_RESULT' && m.request_id === requestId) return { requestId, state: m.state, result: m.result || null };
+      }
+    });
+  }
+
+  /** Ejecuta con recuperación: si se cae la conexión, reconecta y reenvía el MISMO request_id. */
+  execute(req, onStatus = () => {}) {
+    return this.lock(async () => {
+      const payload = { t: 'REQUEST', request_id: req.requestId, op: req.op, app_id: this.appId, params: req.params || {} };
+      let attempts = 0;
+      let delivered = false;
+      let acked = false;
+      while (true) {
+        let s = null;
+        try {
+          s = await this.ensureSession();
+          await s.send(payload);
+          delivered = true;
+          while (true) {
+            const m = await s.receive(acked ? this.cfg.resultTimeoutMs : this.cfg.ackTimeoutMs);
+            if (m.request_id && m.request_id !== req.requestId) continue; // mensaje viejo
+            if (m.t === 'ACK') acked = true;
+            else if (m.t === 'STATUS') {
+              acked = true;
+              try { onStatus({ requestId: req.requestId, status: m.status, detail: m.detail }); } catch { /* nada */ }
+            } else if (m.t === 'RESULT') return { kind: 'completed', requestId: req.requestId, result: m.result };
+            else if (m.t === 'BUSY') return { kind: 'busy', requestId: req.requestId, activeRequestId: m.active_request_id || null };
+            else if (m.t === 'ERROR') return { kind: 'rejected', requestId: req.requestId, code: m.code || 'ERROR', message: m.message || 'Error' };
+          }
+        } catch (e) {
+          if (e instanceof BridgeAuthError) {
+            if (s) this.dropSession(s);
+            throw e;
+          }
+          this.log('warn', `Conexión perdida en ${short(req.requestId)} (intento ${attempts + 1}): ${e.message}`);
+          if (s) this.dropSession(s);
+        }
+        attempts += 1;
+        if (attempts > this.cfg.reconnectAttempts) {
+          return delivered
+            ? { kind: 'indeterminate', requestId: req.requestId, reason: 'Se perdió la conexión con el POS después de enviar la operación' }
+            : { kind: 'rejected', requestId: req.requestId, code: 'SDK_SIN_CONEXION', message: 'No se pudo conectar con el POS' };
+        }
+        await sleep(this.cfg.reconnectDelayMs * Math.min(attempts, 3));
+      }
+    });
+  }
+}
+
+// --- fin bridge-client.js ---
+
+
+const $ = (id) => document.getElementById(id);
+const store = {
+  get(k, d) { try { const v = localStorage.getItem('kioskweb.' + k); return v == null ? d : v; } catch { return d; } },
+  set(k, v) { try { v == null ? localStorage.removeItem('kioskweb.' + k) : localStorage.setItem('kioskweb.' + k, v); } catch { /* nada */ } },
+};
+
+const STATUS_TEXT = {
+  EN_APLICATIVO: 'Siga las instrucciones en el POS',
+  EN_CURSO: 'La operación sigue en curso en el POS',
+  CIERRE_AUTOMATICO: 'El POS pidió cierre (425): cerrando lote',
+  CONCILIANDO: 'Consultando la última transacción',
+};
+
+let transport = store.get('transport', 'wifi');
+let btPort = null;
+let client = null;
+let busy = false;
+let cuenta = '';
+
+// ---------------------------------------------------------------- UI básica
+
+function log(level, msg) {
+  const d = document.createElement('div');
+  if (level === 'warn') d.className = 'warn';
+  if (level === 'error') d.className = 'err';
+  d.textContent = `${new Date().toLocaleTimeString()}  ${msg}`;
+  $('log').prepend(d);
+  while ($('log').childElementCount > 200) $('log').lastChild.remove();
+}
+
+function setStatus(kind, small, big) {
+  $('status').className = 'status ' + kind;
+  $('statusSmall').textContent = small;
+  $('statusBig').textContent = big;
+}
+
+function setConnected(on) {
+  $('connPill').textContent = on ? 'Conectado' : 'Sin conectar';
+  $('connPill').classList.toggle('on', on);
+}
+
+function setBusy(b) {
+  busy = b;
+  document.querySelectorAll('#cobrar, [data-op], #consultar, #connect').forEach((el) => { el.disabled = b; });
+  ['code', 'appId', 'host', 'port', 'tWifi', 'tBt', 'pickBt'].forEach((id) => { $(id).disabled = b; });
+  updateCobrar();
+}
+
+function updateCobrar() {
+  const cents = parseAmount($('monto').value);
+  $('cobrar').textContent = cents ? `Cobrar Bs. ${formatAmount(cents)}` : 'Monto inválido';
+  $('cobrar').disabled = busy || !cents;
+}
+
+function kv(el, rows) {
+  el.replaceChildren(...rows.flatMap(([k, v]) => {
+    const a = document.createElement('span'); a.textContent = k;
+    const b = document.createElement('span'); b.textContent = v;
+    return [a, b];
+  }));
+}
+
+function showTransport() {
+  $('tWifi').classList.toggle('sel', transport === 'wifi');
+  $('tBt').classList.toggle('sel', transport === 'bt');
+  $('wifiBox').classList.toggle('hidden', transport !== 'wifi');
+  $('btBox').classList.toggle('hidden', transport !== 'bt');
+  checkEnv();
+}
+
+function checkEnv() {
+  const msgs = [];
+  if (!window.isSecureContext || !crypto.subtle) msgs.push('Abra la página desde http://localhost o con doble clic en kiosco-standalone.html (no desde otra IP): el navegador solo permite la criptografía y Web Serial en contexto seguro.');
+  if (transport === 'bt' && !('serial' in navigator)) msgs.push('Este navegador no tiene Web Serial. Para Bluetooth use Chrome o Edge de escritorio (versión 117 o más nueva).');
+  $('envWarn').textContent = msgs.join(' ');
+  $('envWarn').classList.toggle('hidden', !msgs.length);
+}
+
+function showCodeInfo() {
+  const sc = parseShortCode($('code').value);
+  if (sc) {
+    $('codeInfo').textContent = `Kiosco ${sc.kioskId} · PIN de 8 dígitos. Escriba abajo la IP del POS (la muestra el Bridge).`;
+    return;
+  }
+  try {
+    const pc = parsePairingCode($('code').value);
+    $('codeInfo').textContent = `Kiosco ${pc.kioskId} · Bridge ${pc.bridgeId}${pc.host ? ' · IP ' + pc.host : ''}`;
+    if (!$('host').value && pc.host) $('host').value = pc.host;
+    // El código trae el puerto TCP (8520); el kiosco web usa el WebSocket, que es ese + 1
+    if (pc.port) {
+      const wsPort = String(pc.port + 1);
+      if ($('port').value !== wsPort) { $('port').value = wsPort; store.set('port', wsPort); }
+    }
+  } catch (e) {
+    $('codeInfo').textContent = $('code').value.trim() ? e.message : '';
+  }
+}
+
+function showPending() {
+  const id = store.get('pending', null);
+  $('pendingBox').classList.toggle('hidden', !id);
+  if (id) $('pendingText').textContent = `Operación sin confirmar: ${id.slice(0, 8)}…`;
+}
+
+// ---------------------------------------------------------------- cliente
+
+async function buildClient() {
+  if (client) return client;
+  const pc = await resolvePairingCode($('code').value);
+  const appId = $('appId').value.trim();
+  if (!appId) throw new Error('Falta el app_id');
+  let connector;
+  if (transport === 'wifi') {
+    const host = $('host').value.trim() || pc.host;
+    if (!host) throw new Error('Falta la IP del POS');
+    const port = Number($('port').value) || DEFAULT_WS_PORT;
+    if (pc.port && port === pc.port) throw new Error(`El puerto ${port} es el TCP de la app Android. El kiosco web usa el WebSocket: ${pc.port + 1}`);
+    connector = webSocketConnector(`ws://${host}:${port}`);
+  } else {
+    if (!btPort) throw new Error('Elija primero el POS por Bluetooth');
+    connector = serialConnector(btPort);
+  }
+  client = new BridgeClient({ connector, kioskId: pc.kioskId, pairingKey: pc.key, appId, log, trace: addTrace });
+  return client;
+}
+
+function resetClient() {
+  if (client) client.disconnect();
+  client = null;
+  setConnected(false);
+}
+
+function showCaps(caps) {
+  const rows = [['Estado', 'conectado']];
+  if (caps.bridge_id) rows.push(['Bridge', caps.bridge_id]);
+  if (caps.model) rows.push(['Modelo', `${caps.model} (Android API ${caps.android_sdk})`]);
+  if (caps.bridge_version) rows.push(['Versión', caps.bridge_version]);
+  if (Array.isArray(caps.transports)) rows.push(['Transportes', caps.transports.join(', ')]);
+  if (caps.simulator) rows.push(['Aviso', 'el Bridge está en MODO SIMULADOR']);
+  kv($('caps'), rows);
+}
+
+async function connect() {
+  let c;
+  try { c = await buildClient(); } catch (e) { setStatus('bad', 'Configuración', e.message); return; }
+  setBusy(true);
+  setStatus('busy', 'Conectando', transport === 'wifi' ? 'Abriendo WebSocket…' : 'Abriendo Bluetooth…');
+  try {
+    const caps = await c.connect();
+    setConnected(true);
+    showCaps(caps);
+    setStatus('idle', 'Conectado', 'Listo para cobrar');
+    log('info', 'Bridge: ' + JSON.stringify(caps));
+    if (caps.media) c.mediaList().then(renderMedia).catch(() => {});
+    else renderMedia(null);
+  } catch (e) {
+    resetClient();
+    const msg = e instanceof BridgeAuthError ? `Rechazado (${e.code}): ${e.message}` : e.message;
+    setStatus('bad', 'No se pudo conectar', msg);
+    log('error', msg);
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function run(label, fn) {
+  let c;
+  try { c = await buildClient(); } catch (e) { setStatus('bad', 'Configuración', e.message); return; }
+  const requestId = newRequestId();
+  store.set('pending', requestId); // se guarda ANTES de enviar
+  resetTrace();
+  setBusy(true);
+  setStatus('busy', label, 'Enviando…');
+  log('info', `→ ${label} ${requestId.slice(0, 8)}`);
+  const onStatus = (s) => {
+    setStatus('busy', label, STATUS_TEXT[s.status] || s.detail || s.status);
+    log('info', `  STATUS ${s.status}`);
+  };
+  try {
+    const out = await fn(c, requestId, onStatus);
+    setConnected(c.connected);
+    handleOutcome(label, out);
+  } catch (e) {
+    resetClient();
+    store.set('pending', null);
+    const msg = e instanceof BridgeAuthError ? `Rechazado (${e.code}): ${e.message}` : e.message;
+    setStatus('bad', label, msg);
+    log('error', msg);
+  } finally {
+    setBusy(false);
+    showPending();
+  }
+}
+
+function handleOutcome(label, out) {
+  if (out.kind === 'completed') {
+    store.set('pending', null);
+    showResult(out.result);
+    const r = out.result;
+    const extras = [];
+    if (r.requires_signature) extras.push('requiere firma');
+    if (r.auto_closure) extras.push(`cierre automático: ${r.auto_closure.code}`);
+    if (r.recovered) extras.push('recuperado');
+    setStatus(r.approved ? 'ok' : 'bad', label, (r.approved ? 'APROBADA' : `NO APROBADA (${r.code}) ${r.message}`) + (extras.length ? ' · ' + extras.join(' · ') : ''));
+    log(r.approved ? 'info' : 'warn', `← ${r.code} ${r.message}${extras.length ? ' · ' + extras.join(' · ') : ''}`);
+  } else if (out.kind === 'busy') {
+    store.set('pending', null);
+    setStatus('warn', label, `POS ocupado con ${String(out.activeRequestId || '').slice(0, 8)}`);
+    log('warn', '← BUSY');
+  } else if (out.kind === 'rejected') {
+    store.set('pending', null);
+    setStatus('bad', label, `Rechazada: ${out.code} · ${out.message}`);
+    log('warn', `← ${out.code} ${out.message}`);
+  } else {
+    setConnected(false);
+    setStatus('warn', label, 'INDETERMINADA: consulte antes de volver a cobrar');
+    log('error', `← INDETERMINADA ${out.requestId}`);
+  }
+}
+
+// ---------------------------------------------------------------- mensajes (traza)
+
+const TRACE_LABEL = {
+  REQUEST: 'Kiosco → Bridge', QUERY: 'Kiosco → Bridge', ACK: 'Bridge → Kiosco', STATUS: 'Bridge → Kiosco',
+  RESULT: 'Bridge → Kiosco', BUSY: 'Bridge → Kiosco', ERROR: 'Bridge → Kiosco', QUERY_RESULT: 'Bridge → Kiosco',
+};
+let traceItems = [];
+let traceDetailed = false;
+
+function resetTrace() { traceItems = []; renderTrace(); }
+
+function addTrace(dir, m) {
+  // Lo que el Bridge le mandó al Aplicativo viene dentro del resultado; se muestra antes del RESULT
+  const r = m.t === 'RESULT' ? m.result : (m.t === 'QUERY_RESULT' ? m.result : null);
+  if (r && r.sent_extras) traceItems.push({ dir: 'app', m: { t: 'INTENT', extras: r.sent_extras, raw: r.raw }, at: new Date() });
+  if (r && r.auto_closure && r.auto_closure.sent_extras) {
+    traceItems.push({ dir: 'app', m: { t: 'INTENT (cierre automático)', extras: r.auto_closure.sent_extras, raw: r.auto_closure.raw }, at: new Date() });
+  }
+  traceItems.push({ dir, m, at: new Date() });
+  renderTrace();
+}
+
+// Vista simple: solo el mensaje que salió del kiosco y el último que recibió (RESULT, BUSY, ERROR…)
+function simpleTrace() {
+  const sent = traceItems.find((i) => i.dir === 'out');
+  const got = [...traceItems].reverse().find((i) => i.dir === 'in' && !['ACK', 'STATUS'].includes(i.m.t));
+  return [sent, got].filter(Boolean);
+}
+
+function renderTrace() {
+  const box = $('trace');
+  if (!traceItems.length) { box.textContent = '—'; return; }
+  const items = traceDetailed ? traceItems : simpleTrace();
+  box.replaceChildren(...items.map(({ dir, m, at }) => {
+    const wrap = document.createElement('div');
+    const title = document.createElement('div');
+    title.style.cssText = 'font-weight:600;margin-top:10px;color:var(--text)';
+    const who = dir === 'app' ? 'Bridge → Aplicativo Financiero' : (TRACE_LABEL[m.t] || (dir === 'out' ? 'Kiosco → Bridge' : 'Bridge → Kiosco'));
+    title.textContent = `${at.toLocaleTimeString()}  ${who} · ${m.t}`;
+    const pre = document.createElement('pre');
+    if (dir === 'app') {
+      pre.textContent = 'putExtra:\n' + Object.entries(m.extras).map(([k, v]) => `  "${k}" = "${v}"`).join('\n') +
+        (m.raw ? '\n\nRespuesta cruda del Aplicativo (extra "message"):\n' + m.raw : '');
+    } else {
+      const shown = traceDetailed && m.t === 'RESULT' ? { ...m, result: '(ver Resultado)' } : m;
+      pre.textContent = JSON.stringify(shown, null, 2);
+    }
+    wrap.append(title, pre);
+    return wrap;
+  }));
+}
+
+$('traceToggle').onclick = () => {
+  traceDetailed = !traceDetailed;
+  $('traceToggle').textContent = traceDetailed ? 'Ver resumen' : 'Ver traza detallada';
+  $('traceHint').textContent = traceDetailed
+    ? 'Todo el recorrido: kiosco → Bridge, Bridge → Aplicativo (extras del intent y respuesta cruda) y de vuelta.'
+    : 'Lo que salió del kiosco y la respuesta que recibió.';
+  renderTrace();
+};
+
+function showResult(r) {
+  const d = r.data || {};
+  const rows = [['Operación', `${r.op} (${r.op_code || 'sin código'})`], ['Código', r.code], ['Mensaje', r.message], ['Aprobada', r.approved ? 'sí' : 'no']];
+  if (r.requires_signature) rows.push(['Firma', 'requerida']);
+  if (d.codigo_autorizacion) rows.push(['Autorización', d.codigo_autorizacion]);
+  if (d.reference) rows.push(['Referencia', d.reference]);
+  if (d.amount) rows.push(['Monto', `${d.currency || ''} ${d.amount}`.trim()]);
+  if (d.cardNumber) rows.push(['Tarjeta', `${d.tipo_tarjeta || d.cardFranchise || ''} ${d.cardNumber}`.trim()]);
+  if (r.auto_closure) rows.push(['Cierre automático', `${r.auto_closure.code} ${r.auto_closure.message}`]);
+  if (r.recovered) rows.push(['Recuperado', 'sí (resultado guardado en el POS)']);
+  kv($('summary'), rows);
+  $('json').textContent = JSON.stringify(r, null, 2);
+  $('json').classList.remove('hidden');
+}
+
+// ---------------------------------------------------------------- eventos
+
+$('code').value = store.get('code', '');
+$('appId').value = store.get('appId', '');
+$('host').value = store.get('host', '');
+$('port').value = store.get('port', String(DEFAULT_WS_PORT));
+showCodeInfo();
+showTransport();
+showPending();
+updateCobrar();
+
+for (const id of ['code', 'appId', 'host', 'port']) {
+  $(id).addEventListener('input', () => {
+    store.set(id, $(id).value.trim());
+    if (id === 'code') showCodeInfo();
+    resetClient();
+  });
+}
+$('monto').addEventListener('input', updateCobrar);
+$('tWifi').onclick = () => { transport = 'wifi'; store.set('transport', transport); resetClient(); showTransport(); };
+$('tBt').onclick = () => { transport = 'bt'; store.set('transport', transport); resetClient(); showTransport(); };
+
+$('cuentas').addEventListener('click', (e) => {
+  const b = e.target.closest('button');
+  if (!b) return;
+  cuenta = b.dataset.v;
+  $('cuentas').querySelectorAll('button').forEach((x) => x.classList.toggle('sel', x === b));
+});
+
+$('pickBt').onclick = async () => {
+  try {
+    btPort = await requestBluetoothPort();
+    const info = btPort.getInfo();
+    const which = info.bluetoothServiceClassId === BT_SERVICE_UUID ? 'servicio propio del Bridge'
+      : info.bluetoothServiceClassId === BT_SPP_UUID ? 'puerto serie estándar (SPP)'
+      : info.bluetoothServiceClassId ? info.bluetoothServiceClassId : 'puerto serie del sistema';
+    $('btInfo').textContent = `Seleccionado: ${which}`;
+    resetClient();
+  } catch (e) {
+    if (e.name !== 'NotFoundError') $('btInfo').textContent = e.message;
+  }
+};
+
+// Si ya se había dado permiso a un puerto Bluetooth, se reusa al recargar la página
+if ('serial' in navigator) {
+  navigator.serial.getPorts().then((ports) => {
+    const p = ports.find((x) => [BT_SERVICE_UUID, BT_SPP_UUID].includes(x.getInfo().bluetoothServiceClassId)) || ports[0];
+    if (p && !btPort) { btPort = p; $('btInfo').textContent = 'Puerto Bluetooth autorizado antes (se puede elegir otro).'; }
+  }).catch(() => {});
+}
+
+// ---------------------------------------------------------------- pantalla del POS (contenido)
+
+let mediaCtrl = null;
+const fmtSize = (n) => (n >= 1024 ** 3 ? `${+(n / 1024 ** 3).toFixed(1)} GB`
+  : n >= 1024 * 1024 ? `${+(n / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
+
+function mediaStatus(text, bad = false) {
+  $('mediaMsg').textContent = text;
+  $('mediaMsg').style.color = bad ? 'var(--bad)' : '';
+}
+
+function renderMedia(list) {
+  const box = $('mediaList');
+  $('mediaUsage').textContent = list?.limits?.max_total_bytes
+    ? `Usado ${fmtSize(list.limits.used_bytes || 0)} de ${fmtSize(list.limits.max_total_bytes)} · máx. ${fmtSize(list.limits.max_file_bytes)} por archivo`
+    : '';
+  if (!list) { box.textContent = 'Conéctese para ver la lista.'; return; }
+  if (!list.items.length) { box.textContent = 'Sin contenido: el POS muestra solo el texto de bienvenida.'; return; }
+  box.replaceChildren(...list.items.map((it, i) => {
+    const row = document.createElement('div');
+    row.className = 'media-item';
+    const name = document.createElement('span');
+    name.className = 'name';
+    name.textContent = `${i + 1}. ${it.name}`;
+    const info = document.createElement('small');
+    info.textContent = (it.kind === 'VIDEO' ? 'Video completo' : `Imagen · ${it.seconds} s`) + ` · ${fmtSize(it.size)}`;
+    const del = document.createElement('button');
+    del.type = 'button';
+    del.textContent = 'Borrar';
+    del.onclick = () => mediaDelete(it);
+    row.append(name, del, info);
+    return row;
+  }));
+}
+
+/** Cliente conectado para las operaciones de contenido (conecta si hace falta). */
+async function mediaClient() {
+  const c = await buildClient();
+  if (!c.connected) {
+    const caps = await c.connect();
+    setConnected(true);
+    showCaps(caps);
+  }
+  if (c.caps && c.caps.media !== true) throw new MediaError('BRIDGE_CONTENIDO_NO_DISPONIBLE', 'Este Bridge no acepta contenido: actualícelo');
+  return c;
+}
+
+function mediaErrorText(e) {
+  if (e instanceof MediaError || e instanceof BridgeAuthError) return `${e.message} (${e.code})`;
+  return e.message;
+}
+
+async function mediaRefresh() {
+  try {
+    const c = await mediaClient();
+    renderMedia(await c.mediaList());
+  } catch (e) {
+    mediaStatus(mediaErrorText(e), true);
+  }
+}
+
+function needPin() {
+  const pin = $('mediaPin').value.trim();
+  if (!/^\d{4,8}$/.test(pin)) { mediaStatus('Escriba el PIN de administrador del POS (4 a 8 dígitos)', true); $('mediaPin').focus(); return null; }
+  return pin;
+}
+
+async function mediaDelete(it) {
+  const pin = needPin();
+  if (!pin) return;
+  if (!confirm(`¿Borrar "${it.name}" de la pantalla del POS?`)) return;
+  try {
+    const c = await mediaClient();
+    renderMedia(await c.mediaDelete(it.id, pin));
+    mediaStatus(`Se borró ${it.name}`);
+    log('info', `Contenido borrado: ${it.name}`);
+  } catch (e) {
+    mediaStatus(mediaErrorText(e), true);
+  }
+}
+
+async function mediaUpload() {
+  const file = $('mediaFile').files[0];
+  if (!file) { mediaStatus('Elija un video o una imagen', true); return; }
+  const pin = needPin();
+  if (!pin) return;
+  const seconds = Math.min(120, Math.max(3, Number($('mediaSeconds').value) || 8));
+  mediaCtrl = new AbortController();
+  $('mediaUpload').disabled = true;
+  $('mediaCancel').classList.remove('hidden');
+  $('mediaProg').classList.remove('hidden');
+  $('mediaProg').value = 0;
+  const t0 = Date.now();
+  mediaStatus(`Preparando ${file.name}…`);
+  try {
+    const c = await mediaClient();
+    const item = await c.mediaUpload(file, { name: file.name, seconds, adminPin: pin, signal: mediaCtrl.signal }, (sent, total) => {
+      $('mediaProg').value = total ? sent / total : 0;
+      mediaStatus(sent < total ? `Subiendo ${file.name}: ${fmtSize(sent)} de ${fmtSize(total)}` : 'Verificando en el POS…');
+    });
+    log('info', `Contenido cargado: ${item.name} (${item.kind === 'VIDEO' ? 'video' : 'imagen'}, ${fmtSize(item.size)}) en ${((Date.now() - t0) / 1000).toFixed(1)} s`);
+    mediaStatus(`Listo: ${item.name} quedó al final de la lista`);
+    $('mediaFile').value = '';
+    renderMedia(await c.mediaList());
+  } catch (e) {
+    mediaStatus(mediaErrorText(e), true);
+    log('warn', 'Carga de contenido: ' + mediaErrorText(e));
+  } finally {
+    mediaCtrl = null;
+    $('mediaUpload').disabled = false;
+    $('mediaCancel').classList.add('hidden');
+    $('mediaProg').classList.add('hidden');
+  }
+}
+
+$('mediaRefresh').onclick = mediaRefresh;
+$('mediaUpload').onclick = mediaUpload;
+$('mediaCancel').onclick = () => mediaCtrl?.abort();
+
+$('connect').onclick = connect;
+$('disconnect').onclick = () => { resetClient(); renderMedia(null); kv($('caps'), [['Estado', 'sin conectar']]); setStatus('idle', 'Desconectado', 'Sin conexión con el POS'); };
+$('kill').onclick = () => {
+  if (client && client.killConnection()) {
+    log('warn', 'Conexión cortada a propósito: el cliente debe reconectar y recuperar la operación');
+    setConnected(false);
+  } else {
+    log('warn', 'No hay conexión que cortar');
+  }
+};
+
+$('cobrar').onclick = () => {
+  const cents = parseAmount($('monto').value);
+  const ced = $('cedula').value.trim();
+  run(`Compra Bs. ${formatAmount(cents)}`, (c, requestId, onStatus) =>
+    c.compra({ cedula: ced, montoCentimos: cents, cuenta, requestId }, onStatus));
+};
+
+const OPS = {
+  ANULACION: ['Anulación', (c, requestId, s) => c.anulacion({ requestId }, s)],
+  CIERRE: ['Cierre', (c, requestId, s) => c.cierre({ requestId }, s)],
+  ULTIMA_TRANSACCION: ['Última transacción', (c, requestId, s) => c.ultimaTransaccion({ requestId }, s)],
+  TEST_COMUNICACION: ['Test de comunicación', (c, requestId, s) => c.testComunicacion({ requestId }, s)],
+  BORRAR_LOTE: ['Borrar lote', (c, requestId, s) => c.borrarLote({ requestId }, s)],
+  BORRAR_REVERSO: ['Borrar reverso', (c, requestId, s) => c.borrarReverso({ requestId }, s)],
+  CONF_SIM: ['Configuración SIM', (c, requestId, s) => c.confSim({ requestId }, s)],
+  CONF_WIFI: ['Configuración WiFi', (c, requestId, s) => c.confWifi({ requestId }, s)],
+};
+document.querySelectorAll('[data-op]').forEach((b) => { b.onclick = () => run(...OPS[b.dataset.op]); });
+
+$('consultar').onclick = async () => {
+  const id = store.get('pending', null);
+  if (!id) return;
+  let c;
+  try { c = await buildClient(); } catch (e) { setStatus('bad', 'Configuración', e.message); return; }
+  setBusy(true);
+  try {
+    const q = await c.consultar(id);
+    log('info', `QUERY ${id.slice(0, 8)} → ${q.state}`);
+    setStatus(q.result ? (q.result.approved ? 'ok' : 'bad') : 'warn', 'Consulta', `Estado en el POS: ${q.state}`);
+    if (q.result) { showResult(q.result); store.set('pending', null); }
+    if (q.state === 'NOT_FOUND') store.set('pending', null);
+  } catch (e) {
+    setStatus('bad', 'Consulta', e.message);
+  } finally {
+    setBusy(false);
+    showPending();
+  }
+};
+</script>
+</body>
+</html>
