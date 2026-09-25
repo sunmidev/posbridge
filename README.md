@@ -22,6 +22,7 @@ Documentación completa: pestaña **POS Bridge** en la documentación del Aplica
 - Su `app_id`, asignado por Sunmi Corporation C.A.
 - Un POS SUNMI (Android 7.1 o superior) con el Aplicativo Financiero instalado.
 - Kiosco y POS en la misma red WiFi, o emparejados por Bluetooth.
+- Para apps Android o Flutter: Kotlin 2.0 o superior en el proyecto Android.
 
 ## 1. Instalar el Bridge en el POS
 
@@ -39,6 +40,8 @@ adb install apk/pos-bridge-0.1.0.apk
 3. Anote el **código de emparejamiento** (por ejemplo `K01-4827-1936`) y la **IP del POS**.
 
 El kiosco solo puede cobrar con el `app_id` que se registró al emparejarlo.
+
+Emparejar requiere el PIN de administrador del POS. Si no lo tiene, solicite el emparejamiento a SUNMI indicando el ID del kiosco y su `app_id`: le entregarán el código de emparejamiento y la IP del POS.
 
 ## 3. Probar con el kiosco web
 
@@ -71,7 +74,7 @@ dependencies {
 }
 ```
 
-Requiere minSdk 25 y Java 17. Los permisos de red y Bluetooth los agrega el SDK; para Bluetooth en Android 12 o superior, pida `BLUETOOTH_CONNECT` al usuario.
+Requiere minSdk 25, Java 17 y Kotlin 2.0 o superior. Los permisos de red y Bluetooth los agrega el SDK; para Bluetooth en Android 12 o superior, pida `BLUETOOTH_CONNECT` al usuario.
 
 ```kotlin
 import com.sunmivzla.posbridge.sdk.PosBridge
@@ -104,7 +107,93 @@ when (val r = client.compra(cedula = "V12345678", montoCentimos = 1050, requestI
 
 Operaciones: `compra`, `anulacion`, `anulacionPorAutorizacion`, `cierre`, `ultimaTransaccion`, `testComunicacion`, `confSim`, `confWifi`, `borrarLote`, `borrarReverso`. Al salir de la app, llame a `client.close()`.
 
-## 5. Integrar desde una página web
+## 5. Integrar una app Flutter o Java
+
+El SDK está escrito en Kotlin. Desde Flutter, llámelo con un `MethodChannel`: copie los archivos de `sdk/` a `android/app/libs`, agregue las dependencias de la sección 4 en `android/app/build.gradle` (con Kotlin 2.0 o superior) y use este código en su `MainActivity`:
+
+```kotlin
+import com.sunmivzla.posbridge.core.client.BridgeClient
+import com.sunmivzla.posbridge.core.client.TxOutcome
+import com.sunmivzla.posbridge.sdk.PosBridge
+import io.flutter.embedding.android.FlutterActivity
+import io.flutter.embedding.engine.FlutterEngine
+import io.flutter.plugin.common.MethodChannel
+import kotlinx.coroutines.*
+
+class MainActivity : FlutterActivity() {
+    private val scope = MainScope()
+    private var client: BridgeClient? = null
+
+    override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
+        super.configureFlutterEngine(flutterEngine)
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "posbridge").setMethodCallHandler { call, result ->
+            scope.launch {
+                try {
+                    val c = client ?: withContext(Dispatchers.Default) {
+                        PosBridge.create(
+                            applicationContext,
+                            pairingCode = call.argument<String>("codigo")!!,
+                            appId = call.argument<String>("appId")!!,
+                            transport = PosBridge.Transport.WifiFixed(call.argument<String>("ip")!!, 8520),
+                        )
+                    }.also { client = it }
+                    when (call.method) {
+                        "compra" -> {
+                            val out = c.compra(
+                                cedula = call.argument<String>("cedula") ?: "",
+                                montoCentimos = call.argument<Number>("montoCentimos")!!.toLong(),
+                                requestId = call.argument<String>("requestId")!!,
+                            )
+                            result.success(
+                                when (out) {
+                                    is TxOutcome.Completed -> mapOf("kind" to "completed", "result" to out.result.toJson().toString())
+                                    is TxOutcome.Busy -> mapOf("kind" to "busy")
+                                    is TxOutcome.Rejected -> mapOf("kind" to "rejected", "message" to out.message)
+                                    is TxOutcome.Indeterminate -> mapOf("kind" to "indeterminate")
+                                }
+                            )
+                        }
+                        "nuevoRequestId" -> result.success(BridgeClient.newRequestId())
+                        else -> result.notImplemented()
+                    }
+                } catch (e: Exception) {
+                    result.error("POSBRIDGE", e.message, null)
+                }
+            }
+        }
+    }
+}
+```
+
+Desde Dart:
+
+```dart
+import 'dart:convert';
+import 'package:flutter/services.dart';
+
+const canal = MethodChannel('posbridge');
+
+final requestId = await canal.invokeMethod<String>('nuevoRequestId');
+await guardarPendiente(requestId!);                   // antes de cobrar
+
+final r = await canal.invokeMapMethod<String, dynamic>('compra', {
+  'codigo': 'K01-4827-1936',
+  'appId': 'PGSP2M0005',
+  'ip': '192.168.1.50',
+  'cedula': 'V12345678',
+  'montoCentimos': 1050,
+  'requestId': requestId,
+});
+
+if (r!['kind'] == 'completed') {
+  final result = jsonDecode(r['result']);
+  if (result['approved'] == true) imprimirVoucher(result['data']);
+}
+```
+
+Para una app en Java, use el mismo enfoque: una clase en Kotlin dentro de su proyecto que llame al SDK y devuelva el resultado con un callback.
+
+## 6. Integrar desde una página web
 
 ```html
 <script type="module">
@@ -127,6 +216,13 @@ if (out.kind === 'completed' && out.result.approved) imprimirVoucher(out.result.
 - Use la IP del POS, no un nombre.
 - Operaciones: `compra`, `anulacion`, `anulacionPorAutorizacion`, `cierre`, `ultimaTransaccion`, `testComunicacion`, `confSim`, `confWifi`, `borrarLote`, `borrarReverso`.
 
+## Respuesta
+
+- `approved` es `true` solo si `code` es `00`. `message` trae el texto para el cliente y `data` los datos para el voucher.
+- **Error 425:** el Bridge hace el cierre solo. La compra queda no aprobada; el kiosco decide si la intenta otra vez.
+- **Firma:** si `requires_signature` es `true`, el banco pide la firma del tarjetahabiente. En autoservicio no hay quien la reciba: acuerde con SUNMI y su banco cómo manejarlo antes de salir a producción.
+- **Configuración SIM, WiFi, Borrar lote y Borrar reverso** responden con el mismo formato: `approved` es `true` cuando `code` es `00`.
+
 ## Evitar doble cobro
 
 Guarde el `requestId` **antes** de cobrar. Si la conexión se cae, el cliente reconecta y recupera la respuesta; el POS nunca cobra dos veces el mismo `requestId`.
@@ -142,4 +238,4 @@ Si recibe `Indeterminate`, o la app se cerró a mitad de un cobro, consulte ante
 
 ## Soporte
 
-Sunmi Corporation C.A.
+Sunmi Corporation C.A. Solicite a SUNMI su `app_id`, el acceso a este repositorio y el emparejamiento de sus kioscos si no tiene el PIN de administrador del POS.
